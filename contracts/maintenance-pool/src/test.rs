@@ -122,7 +122,7 @@ fn test_pool_lifecycle_and_admin_events() {
             pool_id: 445,
             sponsor: sponsor_a.clone(),
             deposit_index: 0,
-            amount: 1_000,
+            amount: 500,
         },
     );
     token_client.transfer(&sponsor_a, &contract_id, &17i128);
@@ -904,6 +904,40 @@ fn test_reclaim_deposit_rejects_one_second_before_inactivity_window_boundary() {
     env.ledger().set_timestamp(INACTIVITY_WINDOW - 1);
     let err = client.try_reclaim_deposit(&92u64, &0u32, &sponsor);
     assert_eq!(err, Err(Ok(Error::InactivityWindowNotElapsed)));
+}
+
+#[test]
+fn test_reclaim_deposit_refunds_pro_rata_after_shared_withdrawals() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, _treasury, client) = setup(&env);
+
+    let token_admin = Address::generate(&env);
+    let (token_addr, asset_client, token_client) = create_token(&env, &token_admin);
+    let sponsor_a = Address::generate(&env);
+    let sponsor_b = Address::generate(&env);
+    asset_client.mint(&sponsor_a, &100_0000000i128);
+    asset_client.mint(&sponsor_b, &100_0000000i128);
+
+    client.deposit(&93u64, &sponsor_a, &token_addr, &100_0000000i128);
+    client.deposit(&93u64, &sponsor_b, &token_addr, &100_0000000i128);
+
+    let maintainer = Address::generate(&env);
+    client.withdraw(
+        &93u64,
+        &vec![&env, (maintainer, 10_000u32)],
+        &150_0000000i128,
+    );
+    assert_eq!(client.get_pool(&93u64).balance, 50_0000000i128);
+
+    env.ledger().set_timestamp(INACTIVITY_WINDOW + 1);
+    client.reclaim_deposit(&93u64, &0u32, &sponsor_a);
+    assert_eq!(token_client.balance(&sponsor_a), 25_0000000i128);
+    assert_eq!(client.get_pool(&93u64).balance, 25_0000000i128);
+
+    client.reclaim_deposit(&93u64, &1u32, &sponsor_b);
+    assert_eq!(token_client.balance(&sponsor_b), 25_0000000i128);
+    assert_eq!(client.get_pool(&93u64).balance, 0);
 }
 
 #[test]
