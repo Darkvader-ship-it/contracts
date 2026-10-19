@@ -19,7 +19,7 @@ use error::Error;
 use soroban_sdk::{contract, contractevent, contractimpl, token, Address, BytesN, Env, Vec};
 use types::{DataKey, Deposit, MaintenancePool};
 
-use mergefi_common::BPS_DENOMINATOR;
+use mergefi_common::{extend_instance_ttl, BPS_DENOMINATOR};
 
 /// Inactivity window (in seconds) after which a deposit becomes
 /// permissionlessly reclaimable by its original sponsor (#42). If no
@@ -364,6 +364,7 @@ mod contract {
                 .map_err(|e| match e {
                     mergefi_common::SplitError::InvalidSplit => Error::InvalidSplit,
                     mergefi_common::SplitError::SelfPayout => Error::SelfPayout,
+                    mergefi_common::SplitError::TooManyRecipients => Error::TooManyRecipients,
                     mergefi_common::SplitError::Overflow => Error::ArithmeticOverflow,
                 })?;
 
@@ -746,6 +747,21 @@ mod contract {
             env.storage().instance().get(&DataKey::Version).unwrap_or(0)
         }
 
+        /// Returns the basis-point denominator used for fees and payouts.
+        pub fn get_bps_denominator(_env: Env) -> i128 {
+            BPS_DENOMINATOR
+        }
+
+        /// Returns the maximum number of deposits recorded per pool.
+        pub fn get_max_deposits(_env: Env) -> u32 {
+            MAX_DEPOSITS
+        }
+
+        /// Returns the deposit inactivity window in seconds.
+        pub fn get_inactivity_window(_env: Env) -> u64 {
+            INACTIVITY_WINDOW
+        }
+
         /// Admin-only: rotate the admin address. Requires both current admin
         /// and new admin authorization.
         pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
@@ -842,6 +858,3 @@ fn extend_ttl(env: &Env, key: &DataKey) {
 /// Extends the TTL of the contract's instance storage (#38). Instance
 /// storage holds Admin, Treasury, and FeeBps — losing it takes down the
 /// entire contract for every pool.
-fn extend_instance_ttl(env: &Env) {
-    env.storage().instance().extend_ttl(100_000, 500_000);
-}

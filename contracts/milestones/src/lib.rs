@@ -22,7 +22,9 @@ use error::Error;
 use soroban_sdk::{contract, contractevent, contractimpl, token, Address, BytesN, Env, Map, Vec};
 use types::{Contribution, DataKey, IssueStatus, Milestone};
 
-use mergefi_common::{BPS_DENOMINATOR, MAX_SPONSORS, MAX_SPONSORS_LIMIT};
+use mergefi_common::{
+    extend_instance_ttl, BPS_DENOMINATOR, MAX_SPONSORS, MAX_SPONSORS_LIMIT,
+};
 
 /// Minimum grace period (in seconds) after the deadline before anyone can
 /// permissionlessly trigger a cancel_milestone. Mirrors escrow's
@@ -645,6 +647,7 @@ mod contract {
                 .map_err(|e| match e {
                     mergefi_common::SplitError::InvalidSplit => Error::InvalidSplit,
                     mergefi_common::SplitError::SelfPayout => Error::SelfPayout,
+                    mergefi_common::SplitError::TooManyRecipients => Error::TooManyRecipients,
                     mergefi_common::SplitError::Overflow => Error::ArithmeticOverflow,
                 })?;
             let treasury: Address =
@@ -1147,6 +1150,16 @@ mod contract {
                 .ok_or(Error::NotInitialized)
         }
 
+        /// Returns the grace period in seconds before permissionless milestone cancellation.
+        pub fn get_grace_period(_env: Env) -> u64 {
+            GRACE_PERIOD
+        }
+
+        /// Returns the basis-point denominator used for fees and payouts.
+        pub fn get_bps_denominator(_env: Env) -> i128 {
+            BPS_DENOMINATOR
+        }
+
         /// Admin-only: update the protocol fee for NEW milestones created after
         /// this call (Issue #20). Existing milestones are unaffected - they retain
         /// the fee that was active when they were created, providing sponsor trust
@@ -1290,6 +1303,3 @@ fn extend_ttl(env: &Env, key: &DataKey) {
 /// Extends the TTL of the contract's instance storage (#38). Instance
 /// storage holds Admin, Treasury, FeeBps, and MaxSponsors — losing it
 /// takes down the entire contract for every milestone.
-fn extend_instance_ttl(env: &Env) {
-    env.storage().instance().extend_ttl(100_000, 500_000);
-}

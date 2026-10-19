@@ -15,7 +15,9 @@ mod types;
 mod test;
 
 use error::Error;
-use mergefi_common::{BPS_DENOMINATOR, MAX_SPONSORS, MAX_SPONSORS_LIMIT};
+use mergefi_common::{
+    extend_instance_ttl, BPS_DENOMINATOR, MAX_SPONSORS, MAX_SPONSORS_LIMIT,
+};
 use soroban_sdk::{contract, contractevent, contractimpl, token, Address, BytesN, Env, Vec};
 use types::{Contribution, DataKey, Escrow, EscrowStatus};
 
@@ -529,6 +531,7 @@ mod contract {
                 .map_err(|e| match e {
                     mergefi_common::SplitError::InvalidSplit => Error::InvalidSplit,
                     mergefi_common::SplitError::SelfPayout => Error::SelfPayout,
+                    mergefi_common::SplitError::TooManyRecipients => Error::TooManyRecipients,
                     mergefi_common::SplitError::Overflow => Error::ArithmeticOverflow,
                 })?;
             let treasury: Address =
@@ -1035,6 +1038,16 @@ mod contract {
                 .ok_or(Error::NotInitialized)
         }
 
+        /// Returns the grace period in seconds before permissionless refunds.
+        pub fn get_grace_period(_env: Env) -> u64 {
+            GRACE_PERIOD
+        }
+
+        /// Returns the basis-point denominator used for fees and payouts.
+        pub fn get_bps_denominator(_env: Env) -> i128 {
+            BPS_DENOMINATOR
+        }
+
         /// Admin-only: update the protocol fee for NEW escrows created after
         /// this call (Issue #20). Existing escrows are unaffected - they retain
         /// the fee that was active when they were funded, providing sponsor trust
@@ -1099,9 +1112,6 @@ pub(crate) fn extend_ttl(env: &Env, key: &DataKey) {
 /// storage holds Admin, Treasury, FeeBps, and MaxSponsors — losing it
 /// takes down the entire contract for every issue. Uses the same
 /// threshold/extend_to as persistent records for consistency.
-pub(crate) fn extend_instance_ttl(env: &Env) {
-    env.storage().instance().extend_ttl(100_000, 500_000);
-}
 
 /// Extends the TTL of a persistent entry to (approximately) survive until
 /// `target_timestamp`, capped at Soroban's own persistent-entry TTL

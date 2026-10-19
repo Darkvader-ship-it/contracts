@@ -17,7 +17,7 @@
 
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::BPS_DENOMINATOR;
+use crate::{BPS_DENOMINATOR, MAX_RECIPIENTS};
 
 /// The computed protocol fee and each recipient's absolute payout amount.
 pub struct Payouts {
@@ -38,6 +38,8 @@ pub enum SplitError {
     /// A recipient address equals the contract's own address — a self-payout
     /// that would strand funds in the contract with no recovery path.
     SelfPayout,
+    /// `recipients` exceeds [`MAX_RECIPIENTS`].
+    TooManyRecipients,
     /// Checked i128 arithmetic overflowed. Returned instead of panicking
     /// (release profile sets `overflow-checks = true` + `panic = "abort"`,
     /// so an unchecked op would abort the whole transaction).
@@ -54,6 +56,9 @@ pub fn compute_split(
 ) -> Result<Payouts, SplitError> {
     if recipients.is_empty() {
         return Err(SplitError::InvalidSplit);
+    }
+    if recipients.len() > MAX_RECIPIENTS {
+        return Err(SplitError::TooManyRecipients);
     }
 
     let mut bps_sum: i128 = 0;
@@ -185,6 +190,39 @@ pub fn sort_remainders_desc(order: &mut Vec<(u32, i128, Address)>) {
         sift_down_remainder_order(order, start, n);
         if start == 0 {
             break;
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use soroban_sdk::{contract, contractimpl};
+
+        #[contract]
+        struct SplitTestContract;
+
+        #[contractimpl]
+        impl SplitTestContract {}
+
+        #[test]
+        fn compute_split_enforces_recipient_limit() {
+            let env = Env::default();
+            let contract_id = env.register(SplitTestContract, ());
+            let mut recipients = Vec::new(&env);
+            for _ in 0..MAX_RECIPIENTS {
+                recipients.push_back((Address::generate(&env), 500u32));
+            }
+
+            let payouts = env.as_contract(&contract_id, || {
+                compute_split(&env, 1_000, 0, &recipients).unwrap()
+            });
+            assert_eq!(payouts.shares.len(), MAX_RECIPIENTS);
+
+            recipients.push_back((Address::generate(&env), 0));
+            let result = env.as_contract(&contract_id, || {
+                compute_split(&env, 1_000, 0, &recipients)
+            });
+            assert!(matches!(result, Err(SplitError::TooManyRecipients)));
         }
     }
 

@@ -40,4 +40,6 @@ pub enum Error {
     SelfPayout = 18,
     /// The stored contract version does not match the requested migration source.
     InvalidVersion = 19,
+    /// The payout recipient list exceeds `MAX_RECIPIENTS`.
+    TooManyRecipients = 20,
 }

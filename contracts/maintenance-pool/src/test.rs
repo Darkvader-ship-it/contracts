@@ -220,6 +220,9 @@ fn test_get_admin_treasury_fee_bps() {
     assert_eq!(client.get_treasury(), treasury);
     assert_eq!(client.get_fee_bps(), 1_000u32);
     assert_eq!(client.get_version(), CONTRACT_VERSION);
+    assert_eq!(client.get_bps_denominator(), BPS_DENOMINATOR);
+    assert_eq!(client.get_max_deposits(), MAX_DEPOSITS);
+    assert_eq!(client.get_inactivity_window(), INACTIVITY_WINDOW);
 }
 
 #[test]
