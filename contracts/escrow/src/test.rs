@@ -2919,6 +2919,130 @@ fn test_release_rejects_self_payout() {
     assert_eq!(escrow.status, crate::types::EscrowStatus::Funded);
 }
 
+struct EscrowSequenceRng {
+    state: u64,
+}
+
+impl EscrowSequenceRng {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        self.state = self
+            .state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.state >> 32) as u32
+    }
+
+    fn next_range(&mut self, upper_bound: u32) -> u32 {
+        self.next_u32() % upper_bound
+    }
+}
+
+fn assert_funded_escrow_solvency(
+    client: &EscrowContractClient<'_>,
+    token_client: &token::Client<'_>,
+    contract_id: &Address,
+    first_issue_id: u64,
+    issue_count: u64,
+) {
+    let mut funded_amount = 0i128;
+    for issue_id in first_issue_id..first_issue_id + issue_count {
+        let escrow = match client.try_get_escrow(&issue_id) {
+            Ok(Ok(escrow)) => escrow,
+            Err(Ok(Error::EscrowNotFound)) => continue,
+            result => panic!("unexpected get_escrow result for {issue_id}: {result:?}"),
+        };
+        if escrow.status == EscrowStatus::Funded {
+            funded_amount = funded_amount
+                .checked_add(escrow.amount)
+                .expect("funded escrow sum should not overflow");
+        }
+    }
+
+    assert!(
+        token_client.balance(contract_id) >= funded_amount,
+        "contract token balance must cover the sum of all funded escrows"
+    );
+}
+
+#[test]
+fn test_escrow_solvency_invariant_fuzzing() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, _admin, _treasury, client) = setup(&env);
+
+    let token_admin = Address::generate(&env);
+    let (token_addr, asset_client, token_client) = create_token(&env, &token_admin);
+    let sponsors = [
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+    ];
+    for sponsor in &sponsors {
+        asset_client.mint(sponsor, &10_000_000i128);
+    }
+    let recipient = Address::generate(&env);
+    let mut rng = EscrowSequenceRng::new(0x5eed);
+    let first_issue_id = 900u64;
+    let issue_count = 8u64;
+    let mut exercised_actions = [false; 4];
+
+    for _ in 0..500 {
+        let issue_id = first_issue_id + rng.next_range(issue_count as u32) as u64;
+        let sponsor = &sponsors[rng.next_range(sponsors.len() as u32) as usize];
+        match rng.next_range(4) {
+            0 => {
+                let amount = rng.next_range(5_000) as i128 + 1;
+                let deadline = env.ledger().timestamp() + 1_000;
+                if matches!(
+                    client.try_fund(&issue_id, sponsor, &token_addr, &amount, &deadline, &None),
+                    Ok(Ok(()))
+                ) {
+                    exercised_actions[0] = true;
+                }
+            }
+            1 => {
+                let amount = rng.next_range(1_000) as i128 + 1;
+                if matches!(
+                    client.try_contribute(&issue_id, sponsor, &amount),
+                    Ok(Ok(()))
+                ) {
+                    exercised_actions[1] = true;
+                }
+            }
+            2 => {
+                let recipients = vec![&env, (recipient.clone(), 10_000u32)];
+                if matches!(client.try_release(&issue_id, &recipients), Ok(Ok(()))) {
+                    exercised_actions[2] = true;
+                }
+            }
+            3 => {
+                if matches!(client.try_refund(&issue_id), Ok(Ok(()))) {
+                    exercised_actions[3] = true;
+                }
+            }
+            _ => unreachable!(),
+        }
+
+        assert_funded_escrow_solvency(
+            &client,
+            &token_client,
+            &contract_id,
+            first_issue_id,
+            issue_count,
+        );
+    }
+
+    assert!(
+        exercised_actions.into_iter().all(|exercised| exercised),
+        "the randomized sequence must successfully exercise fund, contribute, release, and refund"
+    );
+}
+
 // ── upgrade tests (#461) ──────────────────────────────────────────────────────
 
 #[test]

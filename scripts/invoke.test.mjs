@@ -20,9 +20,26 @@ describe("scripts/invoke.mjs CLI argument validation", () => {
     }
   });
 
-  test("fails with exit code 1 when insufficient positional arguments provided", async () => {
+  test("rejects a positional secret even when contract and method are provided", async () => {
     try {
-      await execFileAsync("node", ["scripts/invoke.mjs", "SDUMMYSECRET", "C123"], {
+      await execFileAsync(
+        "node",
+        ["scripts/invoke.mjs", "SDUMMYSECRET", "C123", "some_method"],
+        {
+          env: { ...process.env, INVOKER_SECRET: "", DEPLOYER_SECRET: "" },
+        },
+      );
+      assert.fail("Expected process to exit with non-zero code");
+    } catch (err) {
+      assert.strictEqual(err.code, 1);
+      assert.match(err.stderr, /Usage: INVOKER_SECRET=S/);
+      assert.doesNotMatch(err.stderr, /insecure fallback/);
+    }
+  });
+
+  test("fails without an env secret even when contract arguments are present", async () => {
+    try {
+      await execFileAsync("node", ["scripts/invoke.mjs", "C123"], {
         env: { ...process.env, INVOKER_SECRET: "", DEPLOYER_SECRET: "" },
       });
       assert.fail("Expected process to exit with non-zero code");

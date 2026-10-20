@@ -436,7 +436,7 @@ mod contract {
         /// - The deposit index is out of range
         /// - The caller is not the deposit's original sponsor
         /// - The inactivity window hasn't elapsed since the last withdrawal
-        /// - The pool balance is insufficient (partial reclaim not supported)
+        /// - The pro-rata share of the current pool balance rounds to zero
         pub fn reclaim_deposit(
             env: Env,
             pool_id: u64,
@@ -480,11 +480,26 @@ mod contract {
                 return Err(Error::AlreadyReclaimed);
             }
 
-            if deposit.amount > pool.balance {
-                return Err(Error::InsufficientBalance);
+            let mut total_unreclaimed = 0i128;
+            for index in 0..pool.deposit_count {
+                let outstanding: Deposit = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Deposit(pool_id, index))
+                    .ok_or(Error::DepositNotFound)?;
+                total_unreclaimed = total_unreclaimed
+                    .checked_add(outstanding.amount)
+                    .ok_or(Error::ArithmeticOverflow)?;
             }
 
-            let transfer_amount = deposit.amount;
+            let transfer_amount = pool
+                .balance
+                .checked_mul(deposit.amount)
+                .ok_or(Error::ArithmeticOverflow)?
+                / total_unreclaimed;
+            if transfer_amount == 0 {
+                return Err(Error::InsufficientBalance);
+            }
 
             // Zero the deposit record **before** the transfer so a re-entrant or
             // repeated call cannot drain other sponsors' funds (#479).
@@ -506,7 +521,7 @@ mod contract {
             // pool, breaking balance invariants. (#485)
             pool.total_withdrawn = pool
                 .total_withdrawn
-                .checked_add(deposit.amount)
+                .checked_add(transfer_amount)
                 .ok_or(Error::ArithmeticOverflow)?;
             env.storage().persistent().set(&pkey, &pool);
             extend_ttl(&env, &pkey);

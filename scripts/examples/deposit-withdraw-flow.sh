@@ -41,7 +41,7 @@ WITHDRAW_AMOUNT="${WITHDRAW_AMOUNT:-500000}"
 FEE_BPS="${FEE_BPS:-250}"
 
 admin_pub() {
-  node -e "const {Keypair}=require('@stellar/stellar-sdk'); console.log(Keypair.fromSecret(process.argv[1]).publicKey())" "$1"
+  ADMIN_SECRET="$1" node -e "const {Keypair}=require('@stellar/stellar-sdk'); console.log(Keypair.fromSecret(process.env.ADMIN_SECRET).publicKey())"
 }
 
 ADMIN_ADDRESS="$(admin_pub "$ADMIN_SECRET")"
@@ -51,21 +51,21 @@ SPONSOR_ADDRESS="$(admin_pub "$SPONSOR_SECRET")"
 
 if [ -z "${CONTRACT_ID:-}" ]; then
   echo "==> No CONTRACT_ID given, deploying a fresh mergefi-maintenance-pool instance"
-  CONTRACT_ID="$(node scripts/deploy.mjs "$ADMIN_SECRET" "$WASM_PATH" maintenance-pool | tee /dev/stderr | grep -oE '[A-Z0-9]{56}')"
+  CONTRACT_ID="$(DEPLOYER_SECRET="$ADMIN_SECRET" node scripts/deploy.mjs "$WASM_PATH" maintenance-pool | tee /dev/stderr | grep -oE '[A-Z0-9]{56}')"
 fi
 echo "==> Using contract: $CONTRACT_ID"
 
 echo "==> 1/3 initialize(admin=$ADMIN_ADDRESS, oracle=$ORACLE_ADDRESS, treasury=$TREASURY_ADDRESS, fee_bps=$FEE_BPS)"
-node scripts/invoke.mjs "$ADMIN_SECRET" "$CONTRACT_ID" initialize \
+INVOKER_SECRET="$ADMIN_SECRET" node scripts/invoke.mjs "$CONTRACT_ID" initialize \
   "address:$ADMIN_ADDRESS" "address:$ORACLE_ADDRESS" "address:$TREASURY_ADDRESS" "u32:$FEE_BPS" "none"
 
 echo "==> 2/3 deposit(pool_id=$POOL_ID, sponsor=$SPONSOR_ADDRESS, token=$TOKEN, amount=$DEPOSIT_AMOUNT)"
-node scripts/invoke.mjs "$SPONSOR_SECRET" "$CONTRACT_ID" deposit \
+INVOKER_SECRET="$SPONSOR_SECRET" node scripts/invoke.mjs "$CONTRACT_ID" deposit \
   "u64:$POOL_ID" "address:$SPONSOR_ADDRESS" "address:$TOKEN" "i128:$DEPOSIT_AMOUNT"
 
 echo "==> 3/3 withdraw(pool_id=$POOL_ID, recipient=$ADMIN_ADDRESS, amount=$WITHDRAW_AMOUNT)"
-node scripts/invoke.mjs "$ORACLE_SECRET" "$CONTRACT_ID" withdraw \
+INVOKER_SECRET="$ORACLE_SECRET" node scripts/invoke.mjs "$CONTRACT_ID" withdraw \
   "u64:$POOL_ID" "address:$ADMIN_ADDRESS" "i128:$WITHDRAW_AMOUNT"
 
 echo "==> Done. Query the pool's remaining balance with:"
-echo "    node scripts/invoke.mjs $ADMIN_SECRET $CONTRACT_ID get_pool u64:$POOL_ID"
+echo "    INVOKER_SECRET=\$ADMIN_SECRET node scripts/invoke.mjs $CONTRACT_ID get_pool u64:$POOL_ID"

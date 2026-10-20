@@ -404,10 +404,13 @@ back to the addresses on record — never to the caller.
   deposit.timestamp)` (`InactivityWindowNotElapsed` before that). Every
   oracle `withdraw` sets `last_withdraw_at` and so restarts the window
   for all deposits in the pool; a reclaim does not.
-- Returns the deposit's full original amount; partial reclaim isn't
-  supported, so it fails with `InsufficientBalance` if withdrawals have
-  left the pool below that amount. A deposit can be reclaimed only once
-  (`AlreadyReclaimed`). Not blocked by `pause`.
+- Returns the deposit's pro-rata share of the current pool balance:
+  `pool.balance * deposit.amount / total_unreclaimed_deposits`. This prevents
+  an early claimant from taking another sponsor's share after shared
+  withdrawals. A reclaim can return less than the original deposit, and a
+  share that rounds to zero fails with `InsufficientBalance` without consuming
+  the claim. A deposit can be reclaimed only once (`AlreadyReclaimed`). Not
+  blocked by `pause`.
 - A pool holds at most `MAX_DEPOSITS` deposits (`TooManyDeposits` after
   that), which bounds the number of separately reclaimable records.
 
@@ -774,6 +777,8 @@ release; it contains a separate generated npm package for each contract.
 
 Both scripts default to Stellar testnet but can be pointed at other networks
 via environment variables:
+Pass signing keys through `DEPLOYER_SECRET` or `INVOKER_SECRET` environment
+variables; deploy and invoke do not accept secret keys as positional arguments.
 
 ```sh
 RPC_URL=https://soroban-mainnet.stellar.org \
