@@ -863,13 +863,4 @@ and the clearest place to catch accidental double-commitment or invalid
 recipient conditions before they hit the chain.
 
 ## Recent Changes
-- Ongoing improvements and fixes as part of active development.
-- See commit history and open issues for detailed change tracking.
-
-## Recent Changes
-- Ongoing improvements and fixes as part of active development.
-- See commit history and open issues for detailed change tracking.
-
-## Recent Changes
-- Ongoing improvements and fixes as part of active development.
-- See commit history and open issues for detailed change tracking.
+- See [CHANGELOG.md](CHANGELOG.md) for notable behavior changes and release history.

@@ -24,6 +24,15 @@ change, not backfilled later.
   (#319)
 
 ### Added
+- On-chain getters for grace periods, the basis-point denominator, the
+  maintenance-pool deposit cap, and its inactivity window (#450).
+- A shared `MAX_RECIPIENTS` cap and shared instance-storage TTL extension
+  helper with named thresholds and ledger-time derivation (#447, #451).
+
+### Fixed
+- Removed duplicate "Recent Changes" sections from the README; history is
+  maintained in this changelog (#452).
+
 - `CODEOWNERS`, pinning `contracts/`, `docs/` and `scripts/` review to the
   maintainer for automatic reviewer assignment on the high volume of
   external bounty-program PRs this repo receives (#301, cross-ref #117).

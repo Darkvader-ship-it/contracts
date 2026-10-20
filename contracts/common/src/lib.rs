@@ -81,6 +81,9 @@ pub const BPS_DENOMINATOR: i128 = 10_000;
 /// Maximum number of distinct contributors allowed per escrow or milestone.
 pub const MAX_SPONSORS: u32 = 20;
 
+/// Maximum number of recipients allowed in a payout split.
+pub const MAX_RECIPIENTS: u32 = 20;
+
 /// Maximum allowed single-step fee change (basis points) - Issue #20
 /// Prevents accidental or malicious fee spikes (e.g., 2.5% to 99%)
 pub const MAX_FEE_CHANGE_BPS: u32 = 500; // 5% maximum change per call
@@ -121,7 +124,9 @@ pub fn extend_ttl<K>(env: &Env, key: &K)
 where
     K: IntoVal<Env, Val>,
 {
-    env.storage().persistent().extend_ttl(key, 100_000, 500_000);
+    env.storage()
+        .persistent()
+        .extend_ttl(key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_EXTEND_TO);
 }
 
 /// Stellar's approximate ledger close time, used to convert a duration into
@@ -129,6 +134,24 @@ where
 /// actual average could drift — but the order of magnitude is what matters
 /// here, not sub-day precision. See `extend_ttl_for_target`'s docs.
 const APPROX_SECONDS_PER_LEDGER: u64 = 5;
+
+/// ~5.8 days of remaining lifetime at the approximate 5-second ledger close time.
+const PERSISTENT_TTL_THRESHOLD: u32 = 100_000;
+/// ~29 days of lifetime at the approximate 5-second ledger close time.
+const PERSISTENT_TTL_EXTEND_TO: u32 = 500_000;
+/// ~5.8 days of remaining instance-storage lifetime at ~5 seconds per ledger.
+const INSTANCE_TTL_THRESHOLD: u32 = 100_000;
+/// ~29 days of instance-storage lifetime at ~5 seconds per ledger.
+const INSTANCE_TTL_EXTEND_TO: u32 = 500_000;
+
+/// Extends the contract instance-storage TTL using the same threshold and
+/// target as persistent entries. At the approximate 5-second ledger close
+/// time, these values represent ~5.8 days and ~29 days, respectively.
+pub fn extend_instance_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+}
 
 /// Measures the actual balance delta from a token transfer operation,
 /// protecting against fee-on-transfer tokens, rebasing tokens, and malicious

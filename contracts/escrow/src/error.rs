@@ -37,4 +37,6 @@ pub enum Error {
     InvalidVersion = 22,
     /// `initialize` supplied a sponsor cap above `MAX_SPONSORS_LIMIT`.
     InvalidMaxSponsors = 23,
+    /// The payout recipient list exceeds `MAX_RECIPIENTS`.
+    TooManyRecipients = 24,
 }

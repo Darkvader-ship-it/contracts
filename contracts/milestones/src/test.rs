@@ -1080,6 +1080,8 @@ fn test_get_max_sponsors_defaults_to_the_constant_when_not_specified() {
     let (_admin, _treasury, client) = setup(&env);
 
     assert_eq!(client.get_max_sponsors(), MAX_SPONSORS);
+    assert_eq!(client.get_grace_period(), crate::GRACE_PERIOD);
+    assert_eq!(client.get_bps_denominator(), BPS_DENOMINATOR);
 }
 
 #[test]
