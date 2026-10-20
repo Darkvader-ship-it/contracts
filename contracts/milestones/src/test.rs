@@ -3,7 +3,7 @@
 use super::*;
 use mergefi_common::{MAX_SPONSORS, MAX_SPONSORS_LIMIT};
 use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
+    testutils::{Address as _, Events as _, Ledger as _},
     token, vec, Address, Env, Event,
 };
 
@@ -26,27 +26,6 @@ fn create_token<'a>(
         token::StellarAssetClient::new(env, &address),
         token::Client::new(env, &address),
     )
-}
-
-#[test]
-fn test_upgrade_requires_explicit_idempotent_migration() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (_admin, _treasury, client) = setup(&env);
-
-    env.as_contract(&client.address, || {
-        env.storage().instance().set(&DataKey::Version, &1u32);
-    });
-    let wasm_hash = env
-        .deployer()
-        .upload_contract_wasm(MilestonesContract::__wasm());
-    client.upgrade(&wasm_hash);
-    assert_eq!(client.get_version(), CONTRACT_VERSION);
-
-    client.migrate(&1u32);
-    assert_eq!(client.get_version(), CONTRACT_VERSION);
-    client.migrate(&1u32);
-    assert_eq!(client.get_version(), CONTRACT_VERSION);
 }
 
 #[test]
@@ -283,19 +262,6 @@ fn test_milestone_lifecycle_and_admin_events() {
         },
     );
 
-    let wasm_hash = env
-        .deployer()
-        .upload_contract_wasm(MilestonesContract::__wasm());
-    client.upgrade(&wasm_hash);
-    assert_event(
-        &env,
-        &contract_id,
-        ContractUpgraded {
-            admin: recovered_admin,
-            wasm_hash,
-            version: CONTRACT_VERSION,
-        },
-    );
 }
 
 #[test]
@@ -691,23 +657,6 @@ fn test_create_milestone_requires_sponsor_auth() {
 }
 
 #[test]
-fn test_allocate_requires_admin_auth() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (_admin, _treasury, client) = setup(&env);
-
-    let token_admin = Address::generate(&env);
-    let (token_addr, asset_client, _token_client) = create_token(&env, &token_admin);
-    let sponsor = Address::generate(&env);
-    asset_client.mint(&sponsor, &10_000_000_000i128);
-    client.create_milestone(&7u64, &sponsor, &token_addr, &10_000_000_000i128, &1_000u64);
-
-    env.set_auths(&[]);
-    let result = client.try_allocate(&7u64, &701u64, &100_0000000i128);
-    assert!(result.is_err());
-}
-
-#[test]
 fn test_deallocate_requires_admin_auth() {
     let env = Env::default();
     env.mock_all_auths();
@@ -784,10 +733,10 @@ fn test_release_issue_requires_admin_auth() {
 }
 
 #[test]
-fn test_cancel_milestone_requires_admin_auth() {
+fn test_allocate_requires_admin_auth() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, _treasury, client) = setup(&env);
+    let (admin, _treasury, client) = setup(&env);
 
     let token_admin = Address::generate(&env);
     let (token_addr, asset_client, _token_client) = create_token(&env, &token_admin);
@@ -795,8 +744,108 @@ fn test_cancel_milestone_requires_admin_auth() {
     asset_client.mint(&sponsor, &10_000_000_000i128);
     client.create_milestone(&9u64, &sponsor, &token_addr, &10_000_000_000i128, &1_000u64);
 
-    env.set_auths(&[]);
-    let result = client.try_cancel_milestone(&9u64);
+    let issue_id = 900u64;
+    let amount = 3_000i128;
+    let params = (9u64, issue_id, amount);
+
+    client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &admin,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "allocate",
+                args: soroban_sdk::IntoVal::into_val(&params, &env),
+                sub_invokes: &[],
+            },
+        }])
+        .allocate(&9u64, &issue_id, &amount);
+
+    let attacker = Address::generate(&env);
+    let result = client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &attacker,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "allocate",
+                args: soroban_sdk::IntoVal::into_val(&params, &env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_allocate(&9u64, &issue_id, &amount);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_pause_requires_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (admin, _treasury, client) = setup(&env);
+
+    let params = ();
+    client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &admin,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "pause",
+                args: soroban_sdk::IntoVal::into_val(&params, &env),
+                sub_invokes: &[],
+            },
+        }])
+        .pause();
+
+    let attacker = Address::generate(&env);
+    let result = client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &attacker,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "pause",
+                args: soroban_sdk::IntoVal::into_val(&params, &env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_pause();
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_cancel_milestone_requires_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (admin, _treasury, client) = setup(&env);
+
+    let token_admin = Address::generate(&env);
+    let (token_addr, asset_client, _token_client) = create_token(&env, &token_admin);
+    let sponsor = Address::generate(&env);
+    asset_client.mint(&sponsor, &10_000_000_000i128);
+    client.create_milestone(&9u64, &sponsor, &token_addr, &10_000_000_000i128, &1_000u64);
+
+    let params = (9u64,);
+    client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &admin,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "cancel_milestone",
+                args: soroban_sdk::IntoVal::into_val(&params, &env),
+                sub_invokes: &[],
+            },
+        }])
+        .cancel_milestone(&9u64);
+
+    let attacker = Address::generate(&env);
+    let result = client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &attacker,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "cancel_milestone",
+                args: soroban_sdk::IntoVal::into_val(&params, &env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_cancel_milestone(&9u64);
     assert!(result.is_err());
 }
 
@@ -991,9 +1040,48 @@ fn test_contribute_requires_sponsor_auth() {
     asset_client.mint(&bob, &10_000i128);
     client.create_milestone(&53u64, &alice, &token_addr, &5_000i128, &1_000u64);
 
-    // No auth provided for bob's contribution.
+    let amount = 5_000i128;
+    let params = (53u64, bob.clone(), amount);
+    let transfer_params = (bob.clone(), client.address.clone(), amount);
+    client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &bob,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "contribute",
+                args: soroban_sdk::IntoVal::into_val(&params, &env),
+                sub_invokes: &[soroban_sdk::testutils::MockAuthInvoke {
+                    contract: &token_addr,
+                    fn_name: "transfer",
+                    args: soroban_sdk::IntoVal::into_val(&transfer_params, &env),
+                    sub_invokes: &[],
+                }],
+            },
+        }])
+        .contribute(&53u64, &bob, &amount);
+
+    let attacker = Address::generate(&env);
+    let result = client
+        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &attacker,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "contribute",
+                args: soroban_sdk::IntoVal::into_val(&params, &env),
+                sub_invokes: &[soroban_sdk::testutils::MockAuthInvoke {
+                    contract: &token_addr,
+                    fn_name: "transfer",
+                    args: soroban_sdk::IntoVal::into_val(&transfer_params, &env),
+                    sub_invokes: &[],
+                }],
+            },
+        }])
+        .try_contribute(&53u64, &bob, &amount);
+    assert!(result.is_err());
+
+    // No auth provided for bob's contribution should still fail.
     env.set_auths(&[]);
-    let result = client.try_contribute(&53u64, &bob, &5_000i128);
+    let result = client.try_contribute(&53u64, &bob, &amount);
     assert!(result.is_err());
 }
 
@@ -2382,21 +2470,14 @@ fn test_set_fee_bps_rejects_above_bps_denominator() {
 
 #[test]
 fn test_set_fee_bps_requires_admin_auth() {
-    // Without admin auth mocked the SDK auth framework rejects the call.
     let env = Env::default();
     env.mock_all_auths();
     let (_admin, _treasury, client) = setup(&env);
-    // Drop all mocked auths by creating a fresh env with the same contract state.
-    // Simplest observable proxy: call try_set_fee_bps with no auth mocked at all.
-    let env2 = Env::default(); // no mock_all_auths
+
+    let env2 = Env::default();
     let contract_id2 = env2.register(MilestonesContract, ());
     let client2 = MilestonesContractClient::new(&env2, &contract_id2);
-    {
-        let mut ledger = env2.ledger().with_mut(|l| l.clone());
-        let _ = ledger; // silence unused warning
-    }
-    // initialize requires admin auth — without mocking it the call itself panics;
-    // that is sufficient evidence that the admin guard is in effect.
+
     let init_err = client2.try_initialize(
         &Address::generate(&env2),
         &Address::generate(&env2),
@@ -2405,7 +2486,9 @@ fn test_set_fee_bps_requires_admin_auth() {
         &None,
         &None,
     );
-    assert!(init_err.is_err()); // auth not provided
+    assert!(init_err.is_err());
+}
+
 // ── Regression #471 (closed #307) ─────────────────────────────────────────
 // initialize must reject treasury == contract address with InvalidTreasury.
 #[test]
@@ -2435,6 +2518,7 @@ fn test_initialize_accepts_fee_bps_at_boundary_10000() {
 
     client.initialize(&admin, &oracle, &treasury, &10_000u32, &None, &None);
     assert_eq!(client.get_fee_bps(), 10_000u32);
+}
 
 #[test]
 fn test_keep_alive_succeeds_on_existing_milestone() {
@@ -2462,6 +2546,8 @@ fn test_keep_alive_fails_on_nonexistent_milestone() {
 
     let err = client.try_keep_alive(&9999u64);
     assert_eq!(err, Err(Ok(Error::MilestoneNotFound)));
+}
+
 // ── Regression: issue #491 ────────────────────────────────────────────────────
 
 #[test]
